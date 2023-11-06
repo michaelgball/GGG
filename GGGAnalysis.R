@@ -54,3 +54,47 @@ nb_preds <- predict(final_wf, new_data=testSet, type="class") %>%
   rename(type=.pred_class)
 
 vroom_write(x=nb_preds, file="./NB_Preds.csv", delim=",") 
+
+
+##Neural Networks
+library(nnet)
+trainSet <- vroom("train.csv")
+trainSet$type <- as.factor(trainSet$type)
+
+nn_recipe <- recipe(formula=type~., data=trainSet) %>%
+  update_role(id, new_role="id") %>%
+  step_mutate(color <- as.factor(color)) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_range(all_numeric_predictors(), min=0, max=1) #scale to [0,1]
+
+nn_model <- mlp(hidden_units = tune(),epochs = 50) %>%
+  set_engine("nnet") %>% 
+  set_mode("classification")
+
+nn_wf <- workflow() %>%
+  add_recipe(nn_recipe) %>%
+  add_model(nn_model) 
+
+nn_tuneGrid <- grid_regular(hidden_units(range=c(1, 50)),levels=10)
+folds <- vfold_cv(trainSet, v = 5, repeats=1)
+tuned_nn <- nn_wf %>%
+tune_grid(resamples=folds,grid=nn_tuneGrid,metrics=metric_set(accuracy))
+
+tuned_nn %>% collect_metrics() %>%
+filter(.metric=="accuracy") %>%
+ggplot(aes(x=hidden_units, y=mean)) + geom_line()
+
+bestTune <- tuned_nn %>%
+  select_best("accuracy")
+
+final_wf <-nn_wf %>%
+  finalize_workflow(bestTune) %>%
+  fit(data=trainSet)
+
+## Predict
+nn_preds <- predict(final_wf, new_data=testSet, type="class") %>%
+  bind_cols(., testSet) %>%
+  select(id, .pred_class) %>%
+  rename(type=.pred_class)
+
+vroom_write(x=nn_preds, file="./NN_Preds.csv", delim=",") 
