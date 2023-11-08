@@ -75,7 +75,7 @@ nn_wf <- workflow() %>%
   add_recipe(nn_recipe) %>%
   add_model(nn_model) 
 
-nn_tuneGrid <- grid_regular(hidden_units(range=c(1, 50)),levels=10)
+nn_tuneGrid <- grid_regular(hidden_units(range=c(1, 10)),levels=10)
 folds <- vfold_cv(trainSet, v = 5, repeats=1)
 tuned_nn <- nn_wf %>%
 tune_grid(resamples=folds,grid=nn_tuneGrid,metrics=metric_set(accuracy))
@@ -98,3 +98,72 @@ nn_preds <- predict(final_wf, new_data=testSet, type="class") %>%
   rename(type=.pred_class)
 
 vroom_write(x=nn_preds, file="./NN_Preds.csv", delim=",") 
+
+##Boosting
+library(bonsai)
+library(lightgbm)
+my_recipe <- recipe(formula=type~., data=trainSet) %>%
+  update_role(id, new_role="id") %>%
+  step_mutate(color <- as.factor(color)) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+boost_model <- boost_tree(tree_depth=tune(),
+                          trees=tune(),
+                          learn_rate=tune()) %>%
+set_engine("lightgbm") %>% #or "xgboost" but lightgbm is faster
+  set_mode("classification")
+
+boost_wf <- workflow()%>%
+  add_recipe(my_recipe) %>%
+  add_model(boost_model)
+
+boost_tuneGrid <- grid_regular(tree_depth(),trees(),learn_rate(),levels=3)
+folds <- vfold_cv(trainSet, v = 5, repeats=1)
+tuned_boost <- boost_wf %>%
+  tune_grid(resamples=folds,grid=boost_tuneGrid,metrics=metric_set(accuracy))
+
+bestTune <- tuned_boost %>%
+  select_best("accuracy")
+
+final_wf <-boost_wf %>%
+  finalize_workflow(bestTune) %>%
+  fit(data=trainSet)
+
+## Predict
+boost_preds <- predict(final_wf, new_data=testSet, type="class") %>%
+  bind_cols(., testSet) %>%
+  select(id, .pred_class) %>%
+  rename(type=.pred_class)
+
+vroom_write(x=boost_preds, file="./Boost_Preds.csv", delim=",")
+
+
+##BART
+bart_model <- parsnip::bart(trees=tune()) %>% # BART figures out depth and learn_rate
+  set_engine("dbarts") %>% # might need to install
+  set_mode("classification")
+
+bart_wf <- workflow()%>%
+  add_recipe(my_recipe) %>%
+  add_model(bart_model)
+
+bart_tuneGrid <- grid_regular(trees(),levels=3)
+folds <- vfold_cv(trainSet, v = 5, repeats=1)
+tuned_bart <- bart_wf %>%
+  tune_grid(resamples=folds,grid=bart_tuneGrid,metrics=metric_set(accuracy))
+
+bestTune <- tuned_bart %>%
+  select_best("accuracy")
+
+final_wf <-bart_wf %>%
+  finalize_workflow(bestTune) %>%
+  fit(data=trainSet)
+
+## Predict
+bart_preds <- predict(final_wf, new_data=testSet, type="class") %>%
+  bind_cols(., testSet) %>%
+  select(id, .pred_class) %>%
+  rename(type=.pred_class)
+
+vroom_write(x=bart_preds, file="./Bart_Preds.csv", delim=",")
