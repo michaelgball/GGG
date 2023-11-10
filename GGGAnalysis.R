@@ -1,18 +1,14 @@
 library(tidyverse)
 library(tidymodels)
 library(vroom)
+library(embed)
 
-trainSet <- vroom("train.csv")%>%
-  select(-id)
+trainSet <- vroom("train.csv")
 testSet <- vroom("test.csv")
 
-trainSet$type <- as.factor(trainSet$type)
-
 my_recipe <- recipe(type~., data=trainSet) %>%
-  step_mutate(color <- as.factor(color)) %>%
-  step_dummy(all_nominal_predictors()) %>%
-  step_normalize(all_numeric_predictors()) %>%
-  step_pca(all_predictors(), threshold=.9)
+  step_rm(id) %>%
+  step_lencode_glm(color, outcome = vars(type)) 
 
   #step_impute_knn(missSet$bone_length, impute_with = all_numeric_predictors(), neighbors = 10) %>%
   #step_impute_knn(missSet$hair_length, impute_with = all_numeric_predictors(), neighbors = 10) %>%
@@ -31,7 +27,7 @@ nb_wf <- workflow() %>%
   add_model(nb_model) 
 
 ## Tune smoothness and Laplace here
-tuning_grid <- grid_regular(Laplace(),smoothness(),levels = 4)
+tuning_grid <- grid_regular(Laplace(),smoothness(),levels = 5)
 ## Split data for CV
 folds <- vfold_cv(trainSet, v = 5, repeats=1)
 
@@ -167,3 +163,5 @@ bart_preds <- predict(final_wf, new_data=testSet, type="class") %>%
   rename(type=.pred_class)
 
 vroom_write(x=bart_preds, file="./Bart_Preds.csv", delim=",")
+
+
